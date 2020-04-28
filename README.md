@@ -45,5 +45,6 @@ Put=1
 
 AmericanType=1
 
-bop( InterestRate, Weights, SpotPrices, Volatilities, CorrelationMatrix, Strike, Maturity, NumberTimeSteps = 1000, Put, AmericanType)
+# Reference:
+Hanbali, H. and Linders, D. (2019), 'American-type basket option pricing: a simple two-dimensional Partial Differential Equation', Quantitative Finance 19, pp. 1689--1704.
 
