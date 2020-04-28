@@ -1,0 +1,108 @@
+bop = function( InterestRate, Weights, SpotPrices, Volatilities, CorrelationMatrix, Strike, Maturity, NumberTimeSteps, Put = 0, AmericanType = 0){
+
+### Preliminaries:
+
+N = length(Weights)
+if(! ( length(Weights[Weights>0])==N) ) stop( "All components of argument 'Weights' should be positive" )
+
+if(! ( length(SpotPrices)==N) ) stop( "The number of input in 'SpotPrices' does not match the number of input in 'Weights'" )
+if(! ( length(SpotPrices[SpotPrices>0])==N) ) stop( "All components of argument 'SpotPrices' should be positive" )
+
+if(! ( length(Volatilities)==N) ) stop( "The number of input in 'Volatilities' does not match the number of input in 'Weights'" )
+if(! ( length(Volatilities[Volatilities>0])==N) ) stop( "All components of argument 'Volatilities' should be positive" )
+
+if( length(CorrelationMatrix)==1 ) { CorrelationMatrix = matrix(CorrelationMatrix,ncol=N,nrow=N) ; diag(CorrelationMatrix)=1 }
+if(! is.matrix(CorrelationMatrix) ) stop( "Misspecified correlation matrix: Argument 'CorrelationMatrix' should be a matrix" )
+if(! (ncol(CorrelationMatrix)==nrow(CorrelationMatrix)) ) stop( "Misspecified correlation matrix: Argument 'CorrelationMatrix' should be a square matrix" )
+if(! (ncol(CorrelationMatrix)==N) ) stop( "Misspecified correlation matrix: The size of 'CorrelationMatrix' does not match the number of input in 'Weights'" )
+if(  det(CorrelationMatrix)==0 ) stop( "Misspecified correlation matrix: The determinant of the correlation matrix is zero" )
+if(! identical(diag(CorrelationMatrix),rep(1,N)) ) stop( "Misspecified correlation matrix: The diagonal elements of the correlation matrix should all be equal to one" )
+if(! identical(CorrelationMatrix,t(CorrelationMatrix)) ) stop( "Misspecified correlation matrix: The correlation matrix is not symmetric" )
+if(! ( length(CorrelationMatrix[CorrelationMatrix>=0])==length(CorrelationMatrix)) ) stop( "All components of argument 'Correlation' should be positive" )
+
+if( ( length(Strike)>1 ) ) stop( "Argument 'Strike' can take only one numerical element" )
+if( ( Strike<=0 ) ) stop( "The value of 'Strike' should be positive" )
+
+if( ( length(Maturity)>1 ) ) stop( "Argument 'Maturity' can take only one numerical element" )
+if( ( Maturity<=0 ) ) stop( "The value of 'Maturity' should be positive" )
+
+if( ( length(InterestRate)>1 ) ) stop( "Argument 'InterestRate' can take only one numerical element" )
+if( ( InterestRate<=0 ) ) stop( "The value of 'InterestRate' should be positive" )
+
+if( ( length(NumberTimeSteps)>1 ) ) stop( "Argument 'NumberTimeSteps' can take only one numerical element" )
+if( ( NumberTimeSteps<=0 ) ) stop( "The value of 'NumberTimeSteps' should be positive greater than 1 (recommemded value is 1000)" )
+NumberTimeSteps = ceiling(NumberTimeSteps)
+
+if( ( length(Put)>1 ) ) stop( "Argument 'Put' can take only one numerical element" )
+if(! (Put %in% c(0,1)) ) stop( "Invalid input for 'Put', either 0 (call option) or 1 (put option)" )
+
+if( ( length(AmericanType)>1 ) ) stop( "Argument 'AmericanType' can take only one numerical element" )
+if(! (AmericanType %in% c(0,1)) ) stop( "Invalid input for 'AmericanType', either 0 (European-type option) or 1 (American-type option)" )
+
+##########################################
+
+### Parameters of the lower bound:
+Sum_1 = (Weights*SpotPrices*Volatilities) %*% CorrelationMatrix
+Sum_2 = as.numeric(sqrt( Sum_1 %*% (Weights*SpotPrices*Volatilities) ))
+Ri = (Sum_1 / Sum_2)
+
+### Variances of S, S^c and S^l:
+Exp_1 = exp( ( Volatilities %*% t(Volatilities) ) * CorrelationMatrix * Maturity ) - 1
+Exp_2 = exp( ( Volatilities %*% t(Volatilities) ) * Maturity ) - 1
+Exp_3 = exp( ( t(Volatilities*Ri) %*% (Volatilities*Ri) ) * Maturity ) - 1
+
+Var_S  =  (Weights*SpotPrices) %*% Exp_1 %*% (Weights*SpotPrices)
+Var_Sc =  (Weights*SpotPrices) %*% Exp_2 %*% (Weights*SpotPrices)
+Var_Sl =  (Weights*SpotPrices) %*% Exp_3 %*% (Weights*SpotPrices)
+
+### Weight Z to combine the comonotonic upper and lower bounds:
+Z = (Var_Sc - Var_S) / (Var_Sc - Var_Sl)
+if (identical(as.numeric(CorrelationMatrix), rep(1,length(CorrelationMatrix))))  Z=0
+
+##########################################
+
+### Comonotonic basket grid at time TIME:
+Com_Basket = function( Vols, BM, TIME ){
+
+  Weights_M = t(matrix(rep(Weights,length(BM)),ncol=length(BM)))
+  SpotPrices_M = t(matrix(rep(SpotPrices,length(BM)),ncol=length(BM)))
+  Vols_M = t(matrix(rep(Vols,length(BM)),ncol=length(BM)))
+  BM_M = matrix(rep(BM,N),ncol=N)
+  Stocks = Weights*SpotPrices_M*exp((InterestRate-0.5*Vols_M)*(Maturity-TIME)+ Vols_M*BM_M )
+
+return( rowSums(Stocks) )}
+##########################################
+
+#### Comonotonic Finite Difference Method:
+
+## Time grid
+Time = seq(0,Maturity,length.out=NumberTimeSteps)
+timestep = Time[2]-Time[1]
+
+## Shifted Brownian Motion grid
+step = sqrt(timestep/0.7)
+B_j = seq(-8,5,step)
+gridpoints = length(B_j)
+
+## Finite difference method
+A = (timestep/2)* (1/(step^2))
+B = 1 - (InterestRate*timestep) -  timestep/(step^2)  
+
+Com_FDM_W = function (Volatility){
+
+ SC =Com_Basket( Volatility, B_j,0)
+ Payoff = pmax(SC - Strike, 0)
+ if (Put==1)  Payoff = pmax(Strike - SC, 0)
+
+ V = Payoff
+ for ( k in 2:(NumberTimeSteps-1) ) {
+     V[1:(gridpoints-1)] = c(  (1 - InterestRate*timestep)*V[1], A*(V[1:(gridpoints-2)]+V[3:gridpoints])  +  (B*V[2:(gridpoints-1)])  )
+     V[gridpoints] = 2*V[gridpoints-1] - V[gridpoints-2]
+ if (AmericanType==1) V = pmax(V,pmax(Strike - Com_Basket(Volatility,B_j,Time[k]), 0))
+ }
+ V[1:(gridpoints-1)] = c(  (1 - InterestRate*timestep)*V[1], A*(V[1:(gridpoints-2)]+V[3:gridpoints])  +  (B*V[2:(gridpoints-1)])  )
+ V[gridpoints] = 2*V[gridpoints-1] - V[gridpoints-2]
+return(approx(B_j,V,0)$y)}
+
+return( (1-Z)*Com_FDM_W(Volatilities) + Z*Com_FDM_W(Volatilities*Ri) )
+}
